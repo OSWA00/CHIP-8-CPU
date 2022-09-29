@@ -2,6 +2,8 @@ struct CPU {
     registers: [u8; 16], // 16 registers
     program_counter: usize,
     memory: [u8; 0x1000], // 4096 bytes of RAM
+    stack: [u16; 16],     // 16 nested function calls
+    stack_pointer: usize, // stack pointer
 }
 
 impl CPU {
@@ -24,11 +26,15 @@ impl CPU {
             let y = ((opcode & 0x00F0) >> 4) as u8;
             let d = ((opcode & 0x000F) >> 0) as u8;
 
+            let nnn = opcode & 0x0FFF;
+
             match (c, x, y, d) {
                 (0, 0, 0, 0) => {
                     return;
                 }
                 (0x8, _, _, 0x4) => self.add_xy(x, y),
+                (0, 0, 0xE, 0xE) => self.ret(),
+                (0x2, _, _, _) => self.call(nnn),
                 _ => todo!("opcode {:04x}", opcode),
             }
         }
@@ -47,6 +53,28 @@ impl CPU {
             self.registers[0xF] = 0;
         }
     }
+
+    fn call(&mut self, addr: u16) {
+        let sp = self.stack_pointer;
+        let stack = &mut self.stack;
+
+        if sp > stack.len() {
+            panic!("Stack overflow!");
+        }
+
+        stack[sp] = self.program_counter as u16;
+        self.stack_pointer += 1;
+        self.program_counter = addr as usize;
+    }
+
+    fn ret(&mut self) {
+        if self.stack_pointer == 0 {
+            panic!("Stack underflow");
+        }
+        self.stack_pointer -= 1;
+        let call_addr = self.stack[self.stack_pointer];
+        self.program_counter = call_addr as usize;
+    }
 }
 
 fn main() {
@@ -55,28 +83,32 @@ fn main() {
         registers: [0; 16],
         memory: [0; 4096],
         program_counter: 0,
+        stack: [0; 16],
+        stack_pointer: 0,
     };
 
     cpu.registers[0] = 5;
     cpu.registers[1] = 10;
-    cpu.registers[2] = 10;
-    cpu.registers[3] = 10;
-    //Load opcode
-    let mem = &mut cpu.memory;
-    // Load opcode 0x8014
-    mem[0] = 0x80;
-    mem[1] = 0x14;
 
-    // Load opcode 0x8024
-    mem[2] = 0x80;
-    mem[3] = 0x24;
-    // Load opcode 0x8034
-    mem[4] = 0x80;
-    mem[5] = 0x34;
+    let mem = &mut cpu.memory;
+
+    mem[0x000] = 0x21;
+    mem[0x001] = 0x00;
+    mem[0x002] = 0x21;
+    mem[0x003] = 0x00;
+    mem[0x004] = 0x00;
+    mem[0x005] = 0x00;
+
+    mem[0x100] = 0x80;
+    mem[0x101] = 0x14;
+    mem[0x102] = 0x80;
+    mem[0x103] = 0x14;
+    mem[0x104] = 0x00;
+    mem[0x105] = 0xEE;
 
     cpu.run();
 
-    assert_eq!(cpu.registers[0], 35);
+    assert_eq!(cpu.registers[0], 45);
 
-    println!("5 + 10 + 10 + 10 = {}", cpu.registers[0]);
+    println!("5 + 10 * 2 + 10 * 2 = {}", cpu.registers[0]);
 }
